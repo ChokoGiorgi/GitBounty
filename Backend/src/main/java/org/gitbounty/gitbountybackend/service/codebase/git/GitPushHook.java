@@ -88,6 +88,7 @@ public class GitPushHook implements PostReceiveHook {
         }
 
         String repoName = receivePack.getRepository().getDirectory().getName();
+        repoName = repoName.replaceAll("\\.git$", ""); // Remove .git suffix if present
         Codebase codebase = codebaseService.getCodebase(repoName);
 
         for (ReceiveCommand command : collection) {
