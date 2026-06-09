@@ -51,7 +51,8 @@ class FlywayMigrationTests {
 
     private Integer getMigrationCount() {
         try (Connection connection = dataSource.getConnection();
-             PreparedStatement stmt = connection.prepareStatement("SELECT COUNT(*) FROM flyway_schema_history")) {
+             PreparedStatement stmt =
+                     connection.prepareStatement("SELECT COUNT(*) FROM flyway_schema_history")) {
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     return rs.getInt(1);
