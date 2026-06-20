@@ -37,4 +37,13 @@ public class PullRequestPersistenceService {
         pr.setMergedAt(Instant.now());
         return repository.save(pr);
     }
+
+    public void delete(Long prId) {
+        repository.deleteById(prId);
+    }
+
+    public void updatePRStatus(Long id, IssueStatus issueStatus) {
+        var pr = repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("PR not found with ID: " + id));
+        pr.setStatus(issueStatus);
+    }
 }
