@@ -12,4 +12,3 @@ public class HttpClientConfig {
         return RestClient.builder();
     }
 }
-
