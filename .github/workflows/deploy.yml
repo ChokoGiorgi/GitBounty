@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - develop
   workflow_run:
     workflows: ["Build and Push"]
     types: [completed]
@@ -52,10 +51,18 @@ jobs:
           docker context create remote-vps --docker "host=ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}"
           docker context use remote-vps
 
+      # Authenticate
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.CR_PAT }}
+
       # 4. Deploy using the Remote Context
       - name: Run Docker Compose on Remote
         run: |
           # Now these commands run against the VPS Docker engine
-          docker compose -f compose.yaml pull
-          docker compose -f compose.yaml up -d
+          docker compose -f /home/gitbounty/compose.yaml pull
+          docker compose -f /home/gitbounty/compose.yaml up -d
           docker image prune -f
