@@ -7,20 +7,8 @@ services:
       - "8081:8081"
     volumes:
       - gitbounty-repositories:/app/repositories
-    environment:
-      - SPRING_APPLICATION_NAME=Backend
-      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE}
-      - SPRING_DATASOURCE_URL=${DB_URL}
-      - SPRING_FLYWAY_USER=${FLYWAY_USER}
-      - SPRING_FLYWAY_PASSWORD=${FLYWAY_PASSWORD}
-      - GIT_REPOSITORIES_ROOT=/app/repositories
-      - SPRING_DATASOURCE_USERNAME=${DB_USER}
-      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
-      - KEYCLOAK_ISSUER_URI=${KEYCLOAK_ISSUER_URI}
-      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
-      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
-      - SWAGGER_ENABLED=${SWAGGER_ENABLED}
-      - SWAGGER_OAUTH_CLIENT_ID=${SWAGGER_OAUTH_CLIENT_ID}
+    env_file:
+      - .env
     develop:
       watch:
         - path: Backend/src

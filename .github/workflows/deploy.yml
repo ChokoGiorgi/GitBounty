@@ -9,15 +9,6 @@ on:
     workflows: ["Build and Push"]
     types: [completed]
   workflow_dispatch:
-    inputs:
-      logLevel:
-        description: 'Log level'
-        required: false
-        default: 'warning'
-
-concurrency:
-  group: development-deploy
-  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -28,6 +19,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 1. Copy the compose file to the server
       - name: Copy docker compose file
         uses: appleboy/scp-action@master
         with:
@@ -37,16 +29,33 @@ jobs:
           source: "compose.yaml"
           target: "/home/gitbounty"
 
-      - name: Deploy to VPS
+      # 2. Setup Server Environment
+      - name: Prepare Server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /home/gitbounty
-            echo -e "${{ secrets.ENV_FILE_CONTENT }}" > .env
-            chmod 600 .env
-            docker compose pull
-            docker compose up -d
-            docker image prune -f
+            mkdir -p /home/gitbounty
+            echo -e "${{ secrets.ENV_FILE_CONTENT }}" > /home/gitbounty/.env
+            chmod 600 /home/gitbounty/.env
+
+      # 3. Create and Use Remote Docker Context
+      - name: Set up Docker Context
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          
+          docker context create remote-vps --docker "host=ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}"
+          docker context use remote-vps
+
+      # 4. Deploy using the Remote Context
+      - name: Run Docker Compose on Remote
+        run: |
+          # Now these commands run against the VPS Docker engine
+          docker compose -f /home/gitbounty/compose.yaml pull
+          docker compose -f /home/gitbounty/compose.yaml up -d
+          docker image prune -f
