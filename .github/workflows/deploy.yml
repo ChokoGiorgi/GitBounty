@@ -56,6 +56,6 @@ jobs:
       - name: Run Docker Compose on Remote
         run: |
           # Now these commands run against the VPS Docker engine
-          docker compose -f /home/gitbounty/compose.yaml pull
-          docker compose -f /home/gitbounty/compose.yaml up -d
+          docker compose -f compose.yaml pull
+          docker compose -f compose.yaml up -d
           docker image prune -f
