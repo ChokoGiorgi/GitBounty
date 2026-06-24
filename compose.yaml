@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ghcr.io/freeuni-oop/gitbounty-backend:main
+    image: ghcr.io/freeuni-oop/gitbounty-backend:${BRANCH_NAME:-latest}
     container_name: gitbounty-backend
     restart: unless-stopped
     ports:
@@ -56,7 +56,7 @@ services:
         - gitbounty-network
 
   keycloak:
-    image: quay.io/keycloak/keycloak:latest
+    image: ghcr.io/freeuni-oop/gitbounty-keycloak:${BRANCH_NAME:-latest}
     container_name: gitbounty-keycloak
     env_file:
       - .env
@@ -85,7 +85,7 @@ services:
       - gitbounty-network
 
   frontend:
-    image: ghcr.io/freeuni-oop/gitbounty-frontend:main
+    image: ghcr.io/freeuni-oop/gitbounty-frontend:${BRANCH_NAME:-latest}
 
   caddy:
     image: caddy:latest
