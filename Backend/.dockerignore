@@ -10,19 +10,22 @@
 *.iws
 *.ipr
 
-# Build
+# Local Build Artifacts (Keep these IGNORED)
 target/
+build/
+bin/
+out/
 .mvn/wrapper/maven-wrapper.jar
 
-# Docker
-Dockerfile
-.dockerignore
-docker-compose.yaml
-../compose.yaml
+# Node (If you have a frontend in the same repo)
+node_modules/
+dist/
 
 # Misc
+*.log
+.DS_Store
 README.md
 HELP.md
-.DS_Store
-*.log
 
+# IMPORTANT: REMOVE Dockerfile and docker-compose.yaml from here!
+# Ensure they are NOT listed here so Docker can access them.
