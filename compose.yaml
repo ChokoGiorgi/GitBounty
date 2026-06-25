@@ -3,6 +3,9 @@ services:
     image: ghcr.io/freeuni-oop/gitbounty-backend:${BRANCH_NAME:-latest}
     container_name: gitbounty-backend
     restart: unless-stopped
+    platform: linux/amd64
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
     ports:
       - "8081:8081"
     volumes:
