@@ -71,7 +71,7 @@ services:
         KEYCLOAK_ADMIN: admin
         KEYCLOAK_ADMIN_PASSWORD: admin
     depends_on:
-      - keycloak-db:
+      keycloak-db:
         condition: service_healthy
     ports:
       - "8080:8080"
