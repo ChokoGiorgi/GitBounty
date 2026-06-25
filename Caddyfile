@@ -1,6 +1,14 @@
 # Frontend (The main website)
 {$DOMAIN} {
-    reverse_proxy frontend:80
+    root * /var/www/html
+
+    # Enable the built-in file server
+    file_server
+
+    # Essential for modern SPAs (React/Vue/Angular)
+    # This ensures that refreshing the page on a route like /profile
+    # doesn't result in a 404
+    try_files {path} /index.html
 }
 
 # Backend API
