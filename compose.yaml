@@ -54,6 +54,11 @@ services:
       - keycloak_db_data:/var/lib/postgresql/data
     networks:
         - gitbounty-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U keycloak -d keycloak" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   keycloak:
     image: ghcr.io/freeuni-oop/gitbounty-keycloak:${BRANCH_NAME:-latest}
