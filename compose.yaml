@@ -1,6 +1,9 @@
 services:
   backend:
     image: ghcr.io/freeuni-oop/gitbounty-backend:${BRANCH_NAME:-latest}
+#    build:
+#        context: ./Backend
+#        dockerfile: ./Dockerfile
     container_name: gitbounty-backend
     restart: unless-stopped
     platform: linux/amd64
