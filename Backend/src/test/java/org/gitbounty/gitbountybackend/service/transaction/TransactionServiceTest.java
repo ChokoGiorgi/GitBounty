@@ -153,15 +153,30 @@ class TransactionServiceTest {
         }
 
         @Test
-        void createEscrow_InsufficientCredits_ThrowsIllegalArgumentException() {
-            fromUser.setCreditBalance(new BigDecimal("10.00")); // Less than issue bounty (20.00)
-            when(userRepository.findById(1L)).thenReturn(Optional.of(fromUser));
-            when(userRepository.findById(2L)).thenReturn(Optional.of(toUser));
-            when(issueRepository.findById(10L)).thenReturn(Optional.of(issue));
+        void createEscrow_AlreadyFundedBounty_DoesNotRequireCurrentBalance() {
+            fromUser.setCreditBalance(BigDecimal.ZERO);
 
-            assertThrows(IllegalArgumentException.class, () ->
-                    transactionService.createEscrow(1L, 2L, 10L)
-            );
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.of(fromUser));
+            when(userRepository.findById(2L))
+                    .thenReturn(Optional.of(toUser));
+            when(issueRepository.findById(10L))
+                    .thenReturn(Optional.of(issue));
+            when(transactionRepository.findByBountyIssueIdAndStatus(
+                    10L,
+                    TransactionStatus.PENDING
+            )).thenReturn(Optional.empty());
+
+            when(transactionRepository.save(any(Transaction.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+
+            Transaction result = transactionService.createEscrow(1L, 2L, 10L);
+
+            assertEquals(TransactionStatus.PENDING, result.getStatus());
+            assertEquals(BigDecimal.ZERO, fromUser.getCreditBalance());
+
+            verify(userRepository, never()).save(fromUser);
+            verify(transactionRepository).save(any(Transaction.class));
         }
 
         @Test
@@ -186,14 +201,14 @@ class TransactionServiceTest {
             when(transactionRepository.findById(100L)).thenReturn(Optional.of(pendingTransaction));
             when(transactionRepository.save(any(Transaction.class))).thenReturn(pendingTransaction);
 
-            Transaction result = transactionService.approveTransaction(100L, 1L);
+            Transaction result = transactionService.approveBountyPayout(100L, 1L);
 
             assertEquals(TransactionStatus.COMPLETED, result.getStatus());
-            assertEquals(new BigDecimal("70.00"), toUser.getCreditBalance()); // 50 + 20
-            assertEquals(new BigDecimal("80.00"), fromUser.getCreditBalance()); // 100 - 20
+            assertEquals(new BigDecimal("70.00"), toUser.getCreditBalance());
+
+            assertEquals(new BigDecimal("100.00"), fromUser.getCreditBalance());
             assertNotNull(result.getResolvedAt());
 
-            verify(userRepository).save(fromUser);
             verify(userRepository).save(toUser);
             verify(transactionRepository).save(pendingTransaction);
         }
@@ -203,7 +218,7 @@ class TransactionServiceTest {
             when(transactionRepository.findById(100L)).thenReturn(Optional.empty());
 
             assertThrows(TransactionNotFoundException.class, () ->
-                    transactionService.approveTransaction(100L, 1L)
+                    transactionService.approveBountyPayout(100L, 1L)
             );
         }
 
@@ -213,7 +228,7 @@ class TransactionServiceTest {
             when(transactionRepository.findById(100L)).thenReturn(Optional.of(pendingTransaction));
 
             assertThrows(IllegalArgumentException.class, () ->
-                    transactionService.approveTransaction(100L, 1L)
+                    transactionService.approveBountyPayout(100L, 1L)
             );
         }
 
@@ -223,8 +238,27 @@ class TransactionServiceTest {
 
             // Approver ID is 999L instead of fromUser ID (1L)
             assertThrows(IllegalArgumentException.class, () ->
-                    transactionService.approveTransaction(100L, 999L)
+                    transactionService.approveBountyPayout(100L, 999L)
             );
+        }
+
+        @Test
+        void approveBountyPayout_NonPayoutTransaction_ThrowsIllegalArgumentException() {
+            pendingTransaction.setBounty(null);
+            pendingTransaction.setToUser(null);
+
+            when(transactionRepository.findById(100L))
+                    .thenReturn(Optional.of(pendingTransaction));
+
+            IllegalArgumentException exception = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> transactionService.approveBountyPayout(100L, 1L)
+            );
+
+            assertEquals("Only bounty payout transactions can be approved.", exception.getMessage());
+
+            verify(userRepository, never()).save(any(User.class));
+            verify(transactionRepository, never()).save(any(Transaction.class));
         }
     }
 
@@ -464,6 +498,68 @@ class TransactionServiceTest {
             assertThrows(IllegalArgumentException.class, () ->
                     transactionService.adjustUserCreditBalance(1L, new BigDecimal("-150.00"), "Over-deduction")
             );
+        }
+    }
+
+    @Nested
+    class RecordBountyDepositTests {
+
+        @Test
+        void recordBountyDeposit_DeductsBalanceAndCreatesAuditTransaction() {
+            BigDecimal amount = new BigDecimal("50.00");
+            String description = "Initial escrow deposit";
+
+            when(transactionRepository.save(any(Transaction.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+
+            Transaction result = transactionService.recordBountyDeposit(
+                    fromUser,
+                    bounty,
+                    amount,
+                    description
+            );
+
+            assertEquals(new BigDecimal("50.00"), fromUser.getCreditBalance());
+
+            assertSame(fromUser, result.getFromUser());
+            assertNull(result.getToUser());
+            assertSame(bounty, result.getBounty());
+            assertEquals(amount, result.getAmount());
+            assertEquals(TransactionStatus.COMPLETED, result.getStatus());
+            assertEquals(description, result.getDescription());
+            assertNotNull(result.getResolvedAt());
+
+            verify(userRepository).save(fromUser);
+            verify(transactionRepository).save(any(Transaction.class));
+        }
+
+        @Test
+        void recordBountyRefund_CreditsOwnerAndCreatesAuditTransaction() {
+            BigDecimal amount = new BigDecimal("50.00");
+            String description = "Cancelled bounty refund";
+
+            when(transactionRepository.save(any(Transaction.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+
+            Transaction result = transactionService.recordBountyRefund(
+                    fromUser,
+                    bounty,
+                    amount,
+                    description
+            );
+
+            assertEquals(new BigDecimal("150.00"), fromUser.getCreditBalance());
+
+            assertNull(result.getFromUser());
+            assertSame(fromUser, result.getToUser());
+            assertSame(bounty, result.getBounty());
+            assertEquals(amount, result.getAmount());
+            assertEquals(TransactionStatus.COMPLETED, result.getStatus());
+            assertEquals(description, result.getDescription());
+            assertNotNull(result.getResolvedAt());
+
+            verify(userRepository).save(fromUser);
+            verify(transactionRepository).save(any(Transaction.class));
         }
     }
 }
