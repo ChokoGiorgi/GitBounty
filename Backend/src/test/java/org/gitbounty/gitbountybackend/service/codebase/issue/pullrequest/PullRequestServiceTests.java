@@ -32,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import org.gitbounty.gitbountybackend.service.codebase.issue.event.IssueClosedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class PullRequestServiceTests {
@@ -43,6 +45,7 @@ class PullRequestServiceTests {
     @Mock private CodebaseService codebaseService;
     @Mock private GitService gitService;
     @Mock private PullRequestPersistenceService persistenceService;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private PullRequestService pullRequestService;
@@ -103,6 +106,7 @@ class PullRequestServiceTests {
         pr.setId(99L);
         pr.setSourceBranch(mockSourceBranch);
         pr.setTargetBranch(mockTargetBranch);
+        pr.setAuthor(mockUser);
 
         when(codebaseService.getCodebase(mockRepoName)).thenReturn(mockCodebase);
         when(userService.findByKeycloakId(mockKeycloakId)).thenReturn(Optional.of(mockUser));
@@ -118,6 +122,7 @@ class PullRequestServiceTests {
         pullRequestService.mergePullRequestForCodebase(mockRepoName, 1, mockKeycloakId);
 
         verify(persistenceService).finalizeMerge(99L);
+        verify(eventPublisher).publishEvent(IssueClosedEvent.completed(99L, 1L));
     }
 
     @Test
@@ -147,6 +152,7 @@ class PullRequestServiceTests {
             .isInstanceOf(DatabaseTransactionException.class);
 
         verify(gitService).revertMerge(eq(mockRepoName), eq(mockTargetBranch.getName()), eq(commitId), any(PersonIdent.class));
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -213,6 +219,7 @@ class PullRequestServiceTests {
             pullRequestService.updatePRStatus(mockRepoName, prNumber, IssueStatus.CLOSED);
 
             verify(persistenceService).updatePRStatus(100L, IssueStatus.CLOSED);
+            verify(eventPublisher).publishEvent(IssueClosedEvent.cancelled(100L));
         }
 
         @Test

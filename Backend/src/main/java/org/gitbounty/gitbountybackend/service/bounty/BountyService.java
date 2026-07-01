@@ -87,55 +87,66 @@ public class BountyService {
         return savedBounty;
     }
 
+    /**
+     * Pays the chosen recipient and marks the bounty as completed.
+     */
     @Transactional
-    public void completeBounty(Long bountyId) {
-        Bounty bounty = bountyRepository.findById(bountyId).orElseThrow(() -> new BountyNotFoundException(bountyId));
-        bounty.setStatus(BountyStatus.COMPLETED);
-        bountyRepository.save(bounty);
-
-        if (bounty.getIssue() != null) {
-            Issue issue = bounty.getIssue();
-            issue.setStatus(IssueStatus.CLOSED);
-            issueRepository.save(issue);
+    public void completeBounty(Bounty bounty, Long recipientUserId) {
+        if (bounty == null || bounty.getId() == null) {
+            throw new IllegalArgumentException("A saved bounty is required.");
         }
-    }
-
-    @Transactional
-    public void closeIssueAndBounty(Long issueId) {
-        Issue issue = issueRepository.findById(issueId).orElseThrow(() -> new IssueNotFoundException(issueId));
-        issue.setStatus(IssueStatus.CLOSED);
-        issueRepository.save(issue);
-
-        bountyRepository.findByIssueId(issueId).ifPresent(bounty -> {
-            bounty.setStatus(BountyStatus.COMPLETED);
-            bountyRepository.save(bounty);
-        });
-    }
-
-    @Transactional
-    public void cancelBounty(Long bountyId) {
-        Bounty bounty = bountyRepository.findById(bountyId).orElseThrow(() -> new BountyNotFoundException(bountyId));
 
         if (bounty.getStatus() == BountyStatus.COMPLETED) {
-            throw new BountyAlreadyCompletedException(bountyId);
+            throw new IllegalArgumentException("Bounty is already completed: " + bounty.getId());
         }
 
         if (bounty.getStatus() == BountyStatus.CANCELLED) {
-            throw new IllegalArgumentException("Bounty is already cancelled: " + bountyId);
+            throw new IllegalArgumentException("A cancelled bounty cannot be paid: " + bounty.getId());
         }
 
-        User owner = userRepository
-                .findByKeycloakId(bounty.getIssue().getRepository().getOwner().getKeycloakId())
+        User recipient = userRepository.findById(recipientUserId)
+                .orElseThrow(() -> new UserNotFoundException("Bounty recipient not found: " + recipientUserId));
+
+        transactionService.releaseBounty(bounty, recipient);
+
+        bounty.setStatus(BountyStatus.COMPLETED);
+        bountyRepository.save(bounty);
+    }
+
+    /**
+     * Finds and cancels a bounty by ID.
+     */
+    @Transactional
+    public void cancelBounty(Long bountyId) {
+        Bounty bounty = bountyRepository.findById(bountyId)
+                .orElseThrow(() -> new BountyNotFoundException(bountyId));
+        cancelBounty(bounty);
+    }
+
+    /**
+     * Refunds an active bounty and marks it as cancelled.
+     */
+    @Transactional
+    public void cancelBounty(Bounty bounty) {
+        if (bounty == null || bounty.getId() == null) {
+            throw new IllegalArgumentException("A saved bounty is required.");
+        }
+
+        if (bounty.getStatus() == BountyStatus.COMPLETED) {
+            throw new BountyAlreadyCompletedException(bounty.getId());
+        }
+
+        if (bounty.getStatus() == BountyStatus.CANCELLED) {
+            throw new IllegalArgumentException("Bounty is already cancelled: " + bounty.getId());
+        }
+
+        User owner = userRepository.findByKeycloakId(bounty.getIssue().getRepository().getOwner().getKeycloakId())
                 .orElseThrow(() -> new UserNotFoundException("Paying user not found"));
 
         BigDecimal refundAmount = BigDecimal.valueOf(bounty.getAmount());
 
-        transactionService.recordBountyRefund(
-                owner,
-                bounty,
-                refundAmount,
-                "Bounty refund for issue #" + bounty.getIssue().getNumber() + ": " + bounty.getIssue().getTitle()
-        );
+        transactionService.recordBountyRefund(owner, bounty, refundAmount,
+                "Bounty refund for issue #" + bounty.getIssue().getNumber() + ": " + bounty.getIssue().getTitle());
 
         bounty.setStatus(BountyStatus.CANCELLED);
         bountyRepository.save(bounty);

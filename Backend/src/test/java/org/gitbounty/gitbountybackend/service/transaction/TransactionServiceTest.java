@@ -18,6 +18,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.gitbounty.gitbountybackend.controller.transaction.dto.TransactionResponse;
+import org.gitbounty.gitbountybackend.model.Codebase;
+import java.util.concurrent.atomic.AtomicReference;
+import org.gitbounty.gitbountybackend.model.BountyStatus;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -571,6 +574,67 @@ class TransactionServiceTest {
 
             verify(userRepository).save(fromUser);
             verify(transactionRepository).save(any(Transaction.class));
+        }
+    }
+
+
+    @Nested
+    class ReleaseBountyTests {
+
+        @Test
+        void releaseBounty_ShouldPayRecipientWithoutCreatingEscrow() {
+            Codebase codebase = new Codebase();
+            codebase.setOwner(fromUser);
+
+            issue.setRepository(codebase);
+            bounty.setIssue(issue);
+            bounty.setStatus(BountyStatus.OPEN);
+
+            when(transactionRepository
+                    .findByBountyIdAndStatus(1001L, TransactionStatus.PENDING))
+                    .thenReturn(Optional.empty());
+
+            when(transactionRepository.save(any(Transaction.class)
+            )).thenAnswer(invocation -> invocation.getArgument(0));
+
+            Transaction result = transactionService.releaseBounty(bounty, toUser);
+
+            assertEquals(TransactionStatus.COMPLETED, result.getStatus());
+
+            assertSame(fromUser, result.getFromUser());
+            assertSame(toUser, result.getToUser());
+            assertSame(bounty, result.getBounty());
+
+            assertEquals(new BigDecimal("70.00"), toUser.getCreditBalance());
+            assertEquals(new BigDecimal("100.00"), fromUser.getCreditBalance());
+
+            verify(userRepository).save(toUser);
+            verifyNoInteractions(issueRepository);
+        }
+
+        @Test
+        void releaseBounty_ShouldApproveMatchingPendingPayout() {
+            Codebase codebase = new Codebase();
+            codebase.setOwner(fromUser);
+
+            issue.setRepository(codebase);
+            bounty.setIssue(issue);
+            bounty.setStatus(BountyStatus.OPEN);
+
+            pendingTransaction.setId(100L);
+            pendingTransaction.setBounty(bounty);
+
+            when(transactionRepository
+                    .findByBountyIdAndStatus(1001L, TransactionStatus.PENDING))
+                    .thenReturn(Optional.of(pendingTransaction));
+
+            when(transactionRepository.findById(100L)).thenReturn(Optional.of(pendingTransaction));
+            when(transactionRepository.save(pendingTransaction)).thenReturn(pendingTransaction);
+
+            Transaction result = transactionService.releaseBounty(bounty, toUser);
+
+            assertEquals(TransactionStatus.COMPLETED, result.getStatus());
+            assertEquals(new BigDecimal("70.00"), toUser.getCreditBalance());
         }
     }
 }

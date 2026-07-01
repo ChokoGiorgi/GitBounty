@@ -139,6 +139,88 @@ public class TransactionService {
     }
 
     /**
+     * Releases funds that are already held for a bounty.
+     *
+     * Existing pending payout is approved when present. Otherwise, the
+     * funds (escrowed) are paid directly and recorded as a completed payout.
+     */
+    @Transactional
+    public Transaction releaseBounty(Bounty bounty, User recipient) {
+        if (bounty == null || bounty.getId() == null) {
+            throw new IllegalArgumentException("A saved bounty is required.");
+        }
+
+        if (bounty.getAmount() == null || bounty.getAmount() <= 0) {
+            throw new IllegalArgumentException("Bounty amount must be greater than zero.");
+        }
+
+        if (bounty.getStatus() != BountyStatus.OPEN && bounty.getStatus() != BountyStatus.ASSIGNED) {
+            throw new IllegalArgumentException("Only an active bounty can be paid.");
+        }
+
+        if (recipient == null || recipient.getId() == null) {
+            throw new IllegalArgumentException("A saved bounty recipient is required.");
+        }
+
+        if (bounty.getIssue() == null
+                || bounty.getIssue().getRepository() == null
+                || bounty.getIssue().getRepository().getOwner() == null) {
+            throw new IllegalArgumentException("The bounty owner could not be determined.");
+        }
+
+        User owner = bounty.getIssue().getRepository().getOwner();
+
+        Optional<Transaction> pendingPayout = transactionRepository
+                        .findByBountyIdAndStatus(bounty.getId(), TransactionStatus.PENDING);
+
+        if (pendingPayout.isPresent()) {
+            Transaction payout = pendingPayout.get();
+
+            validatePayoutParticipants(payout, owner, recipient);
+
+            return approveBountyPayout(payout.getId(), owner.getId());
+        }
+
+        BigDecimal amount = BigDecimal.valueOf(bounty.getAmount());
+
+        BigDecimal currentBalance =
+                recipient.getCreditBalance() == null ? BigDecimal.ZERO : recipient.getCreditBalance();
+
+        recipient.setCreditBalance(currentBalance.add(amount));
+
+        userRepository.save(recipient);
+
+        LocalDateTime now = LocalDateTime.now();
+
+        Transaction payout = Transaction.builder()
+                .fromUser(owner)
+                .toUser(recipient)
+                .bounty(bounty)
+                .amount(amount)
+                .status(TransactionStatus.COMPLETED)
+                .description("Bounty payout: " + bounty.getTitle())
+                .createdAt(now)
+                .updatedAt(now)
+                .resolvedAt(now)
+                .build();
+
+        return transactionRepository.save(payout);
+    }
+
+    /**
+     * Make sure an existing pending payout belongs to the expected users.
+     */
+    private void validatePayoutParticipants(Transaction payout, User owner, User recipient) {
+        if (payout.getFromUser() == null || !owner.getId().equals(payout.getFromUser().getId())) {
+            throw new IllegalArgumentException("The pending payout has an unexpected bounty owner.");
+        }
+
+        if (payout.getToUser() == null || !recipient.getId().equals(payout.getToUser().getId())) {
+            throw new IllegalArgumentException("The pending payout has an unexpected recipient.");
+        }
+    }
+
+    /**
      * Reject a pending escrow transaction. No credits are transferred.
      * This can only be called by the bounty creator (fromUser).
      *

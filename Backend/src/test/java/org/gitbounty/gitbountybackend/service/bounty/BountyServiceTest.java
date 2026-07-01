@@ -157,47 +157,6 @@ class BountyServiceTest {
         });
     }
 
-    @Test
-    void completeBounty_ShouldCompleteBountyAndCloseLinkedIssue() {
-        Issue mockIssue = new Issue();
-        mockIssue.setStatus(IssueStatus.OPEN);
-
-        Bounty mockBounty = new Bounty();
-        mockBounty.setId(1L);
-        mockBounty.setStatus(BountyStatus.OPEN);
-        mockBounty.setIssue(mockIssue);
-
-        when(bountyRepository.findById(1L)).thenReturn(Optional.of(mockBounty));
-
-        bountyService.completeBounty(1L);
-
-        assertEquals(BountyStatus.COMPLETED, mockBounty.getStatus());
-        assertEquals(IssueStatus.CLOSED, mockIssue.getStatus());
-
-        verify(bountyRepository, times(1)).save(mockBounty);
-        verify(issueRepository, times(1)).save(mockIssue);
-    }
-
-    @Test
-    void closeIssueAndBounty_ShouldCloseIssueAndCompleteLinkedBounty() {
-        Issue mockIssue = new Issue();
-        mockIssue.setId(20L);
-        mockIssue.setStatus(IssueStatus.OPEN);
-
-        Bounty mockBounty = new Bounty();
-        mockBounty.setStatus(BountyStatus.OPEN);
-
-        when(issueRepository.findById(20L)).thenReturn(Optional.of(mockIssue));
-        when(bountyRepository.findByIssueId(20L)).thenReturn(Optional.of(mockBounty));
-
-        bountyService.closeIssueAndBounty(20L);
-
-        assertEquals(IssueStatus.CLOSED, mockIssue.getStatus());
-        assertEquals(BountyStatus.COMPLETED, mockBounty.getStatus());
-
-        verify(issueRepository, times(1)).save(mockIssue);
-        verify(bountyRepository, times(1)).save(mockBounty);
-    }
 
     @Test
     void cancelBounty_ShouldRefundUserAndCancelBounty_WhenBountyNotCompleted() {
@@ -265,5 +224,26 @@ class BountyServiceTest {
         );
 
         verify(transactionService, never()).recordBountyRefund(any(), any(), any(), any());
+    }
+
+    @Test
+    void completeBounty_ShouldPayRecipientAndMarkBountyCompleted() {
+        User recipient = new User();
+        recipient.setId(2L);
+
+        Bounty bounty = new Bounty();
+        bounty.setId(1L);
+        bounty.setStatus(BountyStatus.OPEN);
+        bounty.setAmount(50.0);
+
+        when(userRepository.findById(2L)).thenReturn(Optional.of(recipient));
+
+        bountyService.completeBounty(bounty, 2L);
+
+        verify(transactionService).releaseBounty(bounty, recipient);
+
+        assertEquals(BountyStatus.COMPLETED, bounty.getStatus());
+
+        verify(bountyRepository).save(bounty);
     }
 }
