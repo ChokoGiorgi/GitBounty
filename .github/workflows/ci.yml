@@ -1,31 +1,19 @@
-name: Run Tests for Backend
+name: Run Tests and Verification
 
 on:
   push:
+    branches:
+      - main
+      - develop
   pull_request:
 
 jobs:
   test:
+    name: Test Backend
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./Backend
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root_password
-          MYSQL_DATABASE: gitbounty_dev
-          MYSQL_USER: dev_user
-          MYSQL_PASSWORD: dev_password
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -u dev_user -pdev_password"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
 
     steps:
       - name: Checkout
@@ -42,10 +30,29 @@ jobs:
         run: chmod +x mvnw
 
       - name: Run tests
-        env:
-          SPRING_PROFILES_ACTIVE: dev
-          SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/gitbounty_dev
-          SPRING_DATASOURCE_USERNAME: dev_user
-          SPRING_DATASOURCE_PASSWORD: dev_password
-        run: ./mvnw -B test
+        # OPTIMIZATION: --no-transfer-progress stops maven from writing download progress lines to the runner log
+        run: ./mvnw -B test --no-transfer-progress
 
+  frontend-build:
+    name: Verify Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./Frontend/gitbounty
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './Frontend/gitbounty/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Build (Typecheck + Vite compilation)
+        run: npm run build

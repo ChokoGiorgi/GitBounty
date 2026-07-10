@@ -1,0 +1,611 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
+import IssuesTab from '../components/IssuesTab';
+import PullRequestsTab from '../components/tabs/pullrequests/PullRequestsTab.tsx';
+import BountiesTab from '../components/BountiesTab';
+import BranchDropdown from '../components/dropdowns/BranchDropdown';
+import '../styles/RepositoryPage.css';
+import apiClient from "../api/apiClient.ts";
+import { useProfileData } from '../hooks/useProfileData';
+import { useAuth } from '../auth/useAuth';
+import { AddCodebaseMemberModal } from '../components/AddCodebaseMemberModal';
+import { DeleteRepositoryModal } from '../components/DeleteRepositoryModal';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import "github-markdown-css/github-markdown.css";
+
+interface MarkdownViewerProps {
+  content: string;
+  isDarkMode: boolean;
+}
+
+function MarkdownViewer({ content, isDarkMode }: Readonly<MarkdownViewerProps>) {
+  return (
+      <div
+          className="markdown-body"
+          style={{
+            padding: '32px',
+            backgroundColor: isDarkMode ? '#0d1117' : '#ffffff',
+            color: isDarkMode ? '#c9d1d9' : '#24292e',
+            borderRadius: '0 0 6px 6px'
+          }}
+      >
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {content}
+        </ReactMarkdown>
+      </div>
+  );
+}
+
+type Tab = 'Code' | 'Issues' | 'Pull Requests' | 'Bounties';
+const TABS: Tab[] = ['Code', 'Issues', 'Pull Requests', 'Bounties'];
+
+interface BranchData {
+  id: number;
+  name: string;
+  latestCommitId: number | null;
+}
+
+interface RepoData {
+  id: number;
+  name: string;
+  description: string;
+  gitUrl: string;
+  ownerUsername: string;
+  createdAt: string;
+}
+
+interface CodebaseWithBranches extends RepoData {
+  branches: BranchData[];
+}
+
+interface ContentsResponse {
+  type: 'FILE' | 'DIRECTORY';
+  content: string | null;
+  items: string[] | null;
+}
+
+// Extract error status string safely from Axios catch blocks
+const getErrorStatus = (err: any): string => err.response?.status?.toString() || err.message;
+
+function looksLikeFile(name: string): boolean {
+  const lowerName = name.toLowerCase();
+
+  // Known folders that start with a dot (add more as needed)
+  const knownFolders = ['.github', '.idea', '.vscode', '.git', '.next'];
+  if (knownFolders.includes(lowerName)) return false;
+
+  // Known files that do not have extensions
+  const knownFiles = ['dockerfile', 'caddyfile', 'makefile', 'gemfile', 'procfile', 'mvnw'];
+  if (knownFiles.includes(lowerName)) return true;
+
+  // If it starts with a dot (and wasn't caught as a folder above), it's a hidden file (.env, .gitignore)
+  if (name.startsWith('.')) return true;
+
+  // Default fallback: if it has a dot, it's a file. If not, it's a folder.
+  return name.includes('.');
+}
+
+function FolderIcon() {
+  return (
+      <svg className="entry-icon dir-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z" />
+      </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+      <svg className="entry-icon file-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z" />
+      </svg>
+  );
+}
+
+function CloneButton({ gitUrl }: Readonly<{ gitUrl: string }>) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [open]);
+
+  const copy = () => {
+    navigator.clipboard.writeText(gitUrl).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+      <div className="clone-wrapper" ref={wrapperRef}>
+        <button className="clone-btn" onClick={() => setOpen(o => !o)}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="m11.28 3.22 4.25 4.25a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 1 1-1.06-1.06L13.94 8l-3.72-3.72a.749.749 0 1 1 1.06-1.06Zm-6.56 0a.749.749 0 1 1 1.06 1.06L2.06 8l3.72 3.72a.749.749 0 1 1-1.06 1.06L.47 8.53a.749.749 0 0 1 0-1.06Z" />
+          </svg>
+          Code
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z" />
+          </svg>
+        </button>
+        {open && (
+            <div className="clone-dropdown">
+              <p className="clone-label">Clone</p>
+              <div className="clone-url-row">
+                <input
+                    className="clone-url-input"
+                    value={gitUrl}
+                    readOnly
+                    onClick={e => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                    className={`clone-copy-btn${copied ? ' copied' : ''}`}
+                    onClick={copy}
+                    aria-label="Copy clone URL"
+                >
+                  {copied ? 'Copied!' : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z" />
+                        <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+                      </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+        )}
+      </div>
+  );
+}
+
+interface HighlighterProps {
+  content: string;
+  isDarkMode: boolean;
+  filename: string;
+}
+
+// Small bounded cache so re-opening a recently viewed file, or toggling
+// light/dark back and forth, doesn't re-run highlighting for content the
+// worker has already processed. Lives at module scope so it survives file
+// switches.
+const HIGHLIGHT_CACHE_LIMIT = 30;
+const highlightCache = new Map<string, string>();
+
+function cacheKey(filename: string, isDarkMode: boolean, content: string) {
+  return `${isDarkMode ? 'dark' : 'light'}|${filename}|${content}`;
+}
+
+function setCached(key: string, html: string) {
+  if (highlightCache.size >= HIGHLIGHT_CACHE_LIMIT) {
+    const oldestKey = highlightCache.keys().next().value;
+    if (oldestKey !== undefined) highlightCache.delete(oldestKey);
+  }
+  highlightCache.set(key, html);
+}
+
+function SyntaxHighlighter({ content, isDarkMode, filename }: Readonly<HighlighterProps>) {
+  const [highlightedHtml, setHighlightedHtml] = useState<string>('');
+  const [isParsing, setIsParsing] = useState<boolean>(true);
+
+  // One worker for the life of the Code tab, not one per file. Recreating
+  // the worker on every file click throws away Shiki's cached highlighter
+  // and re-pays WASM/grammar init every time.
+  const workerRef = useRef<Worker | null>(null);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    workerRef.current = new Worker(new URL('../workers/shiki_worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    return () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    };
+  }, []); // mount/unmount only
+
+  useEffect(() => {
+    const key = cacheKey(filename, isDarkMode, content);
+    const cached = highlightCache.get(key);
+    if (cached) {
+      setHighlightedHtml(cached);
+      setIsParsing(false);
+      return;
+    }
+
+    const worker = workerRef.current;
+    if (!worker) return;
+
+    setIsParsing(true);
+    const requestId = ++requestIdRef.current;
+
+    const handleMessage = (event: MessageEvent) => {
+      const { success, html, error, requestId: respId } = event.data;
+      if (respId !== requestIdRef.current) return; // stale response from a fast file switch, ignore
+
+      if (success) {
+        setCached(key, html);
+        setHighlightedHtml(html);
+      } else {
+        console.error('Shiki Worker failed:', error);
+        setHighlightedHtml(`<pre><code>${content}</code></pre>`);
+      }
+      setIsParsing(false);
+    };
+
+    worker.addEventListener('message', handleMessage);
+    worker.postMessage({ content, isDarkMode, filename, requestId });
+
+    return () => {
+      worker.removeEventListener('message', handleMessage);
+    };
+  }, [content, isDarkMode, filename]);
+
+  const lines = content.split('\n');
+  const lineCount = lines.length > 0 && lines.at(-1) === ''
+      ? lines.length - 1
+      : lines.length;
+
+  return (
+      <div className={`code-viewer ${isParsing ? 'rendering-shiki' : ''}`} data-theme={isDarkMode ? 'dark' : 'light'}>
+        <pre className="line-numbers" aria-hidden="true">
+          {Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')}
+        </pre>
+        {isParsing ? (
+            <pre className="file-content placeholder-loading">
+              <code>{content}</code>
+            </pre>
+        ) : (
+            <div
+                className="file-content shiki-output"
+                // Shiki escapes token content itself; this is the standard
+                // way to render its output.
+                dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+            />
+        )}
+      </div>
+  );
+}
+
+export default function RepositoryPage() {
+  const { owner = '', repoName = '' } = useParams<{ owner: string; repoName: string }>();
+  const navigate = useNavigate();
+
+  const [searchParams] = useSearchParams();
+
+  const { user: currentUser } = useProfileData();
+  const { authenticated } = useAuth();
+  const [activeTab, setActiveTab] = useState<Tab>(
+      searchParams.get('tab') === 'Issues' ? 'Issues' : 'Code'
+  );
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'Issues') {
+      setActiveTab('Issues');
+    }
+  }, [searchParams]);
+
+  const [isDarkBox, setIsDarkBox] = useState(true);
+  const [currentBranch, setCurrentBranch] = useState('main');
+  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [membersRefreshKey, setMembersRefreshKey] = useState(0);
+
+  // Repo metadata
+  const [repo, setRepo] = useState<RepoData | null>(null);
+  const [repoLoading, setRepoLoading] = useState(true);
+  const [repoError, setRepoError] = useState<string | null>(null);
+
+  // Branches
+  const [branches, setBranches] = useState<BranchData[]>([]);
+
+  // Code browser state
+  const [path, setPath] = useState<string[]>([]);
+  const [dirItems, setDirItems] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState<{ name: string; content: string } | null>(null);
+  const [contentsLoading, setContentsLoading] = useState(false);
+  const [contentsError, setContentsError] = useState<string | null>(null);
+
+  // Fetch repo metadata
+  useEffect(() => {
+    if (!repoName) return;
+    let cancelled = false;
+    setRepoLoading(true);
+
+    apiClient.get<CodebaseWithBranches>(`/api/codebases/${repoName}`)
+        .then(response => {
+          if (!cancelled) {
+            const { branches: responseBranches, ...repoData } = response.data;
+            setRepo(repoData);
+            const cleanedBranches = responseBranches?.map(branch => ({
+              ...branch,
+              name: branch.name.replace(/^refs\/heads\//, '')
+            })) || [];
+
+            setBranches(cleanedBranches);
+            setRepoLoading(false);
+          }
+        })
+        .catch((err: any) => {
+          if (!cancelled) {
+            setRepoError(getErrorStatus(err));
+            setRepoLoading(false);
+          }
+        });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repoName]);
+
+  // DRY Centralized Content Fetcher
+  const fetchContents = useCallback(async (targetPath: string[]) => {
+    const pathStr = targetPath.join('/');
+    const baseUrl = pathStr
+        ? `/api/codebases/${repoName}/contents/${pathStr}`
+        : `/api/codebases/${repoName}/contents`;
+
+    setContentsLoading(true);
+    setContentsError(null);
+
+    try {
+      const response = await apiClient.get<ContentsResponse>(`${baseUrl}?branch=${currentBranch}`);
+      return response.data;
+    } catch (err: any) {
+      setContentsError(getErrorStatus(err));
+      return null;
+    } finally {
+      setContentsLoading(false);
+    }
+  }, [repoName, currentBranch]);
+
+  // Navigate to directory and map its array structure
+  const fetchDir = useCallback(async (newPath: string[]) => {
+    setSelectedFile(null);
+    const data = await fetchContents(newPath);
+    if (data) {
+      setDirItems(data.items ?? []);
+      setPath(newPath);
+    }
+  }, [fetchContents]);
+
+  // Initial directory load
+  useEffect(() => { fetchDir([]); }, [fetchDir]);
+
+  // Handle row interactions for both files and nested directories
+  const handleItemClick = async (name: string) => {
+    const newPath = [...path, name];
+    const data = await fetchContents(newPath);
+    if (!data) return;
+
+    if (data.type === 'FILE') {
+      setSelectedFile({ name, content: data.content ?? '' });
+    } else {
+      setDirItems(data.items ?? []);
+      setPath(newPath);
+      setSelectedFile(null);
+    }
+  };
+
+  const navTo = (idx: number) => fetchDir(path.slice(0, idx));
+  const goRoot = () => fetchDir([]);
+  const switchTab = (tab: Tab) => { setActiveTab(tab); goRoot(); };
+
+  if (repoLoading) {
+    return <div className="repo-not-found"><p>Loading repository…</p></div>;
+  }
+
+  if (repoError || !repo) {
+    return (
+        <div className="repo-not-found">
+          <p>Repository <strong>{repoName}</strong> not found.</p>
+          <Link to="/repositories">Back to repositories</Link>
+        </div>
+    );
+  }
+
+  const canManageMembers = authenticated && currentUser?.username === repo.ownerUsername;
+
+  return (
+      <div className="repo-page">
+        {/* ── Header ── */}
+        <div className="repo-header">
+          <div className="repo-title-row">
+            <div className="repo-title-main">
+              <Link to="/repositories" className="repo-owner-link">{owner}</Link>
+              <span className="repo-sep">/</span>
+              <span className="repo-name">{repoName}</span>
+              <span className="repo-visibility-badge">Public</span>
+            </div>
+
+            <div className="repo-header-actions">
+              <BranchDropdown
+                  branches={branches.map(b => b.name)}
+                  currentBranch={currentBranch}
+                  onBranchChange={setCurrentBranch}
+              />
+
+              <CloneButton gitUrl={repo.gitUrl} />
+
+              {canManageMembers && (
+                  <button
+                      type="button"
+                      className="add-member-btn"
+                      onClick={() => setIsAddMemberModalOpen(true)}
+                  >
+                    Add member
+                  </button>
+              )}
+            </div>
+          </div>
+          {repo.description && <p className="repo-description">{repo.description}</p>}
+
+          {/* ── Tab bar ── */}
+          <div className="repo-tabs">
+            {TABS.map((tab) => (
+                <button
+                    key={tab}
+                    className={`repo-tab ${activeTab === tab ? 'active' : ''}`}
+                    onClick={() => switchTab(tab)}
+                >
+                  {tab}
+                </button>
+            ))}
+          </div>
+        </div>
+
+        <AddCodebaseMemberModal
+            isOpen={isAddMemberModalOpen}
+            repositoryName={repoName}
+            onClose={() => setIsAddMemberModalOpen(false)}
+            onSuccess={() => {
+              setMembersRefreshKey((current) => current + 1);
+            }}
+        />
+
+        <DeleteRepositoryModal
+            isOpen={isDeleteModalOpen}
+            repositoryId={repo.id}
+            repositoryName={repoName}
+            onClose={() => setIsDeleteModalOpen(false)}
+            onDeleted={() => navigate('/repositories')}
+        />
+
+        {/* ── Tab content ── */}
+        {activeTab === 'Issues' && (
+            <IssuesTab
+                repoId={repo.id}
+                repoName={repoName}
+                canCreateIssues={authenticated}
+                canManageBounties={currentUser?.username === repo.ownerUsername}
+                membersRefreshKey={membersRefreshKey}
+            />
+        )}
+        {activeTab === 'Pull Requests' && <PullRequestsTab repoName={repoName} />}
+        {activeTab === 'Bounties' && (
+            <BountiesTab
+                repoId={repo.id.toString()}
+                onViewIssue={() => {
+                  setActiveTab('Issues');
+                }}
+            />
+        )}
+        {activeTab === 'Code' && (
+            <div className="repo-browser">
+              <div className="breadcrumb">
+                <button className="breadcrumb-seg link" onClick={goRoot}>{repoName}</button>
+                {path.map((seg, i) => (
+                    <React.Fragment key={seg + i}>
+                      <span className="breadcrumb-slash">/</span>
+                      <button className="breadcrumb-seg link" onClick={() => navTo(i + 1)}>{seg}</button>
+                    </React.Fragment>
+                ))}
+                {selectedFile && (
+                    <>
+                      <span className="breadcrumb-slash">/</span>
+                      <span className="breadcrumb-seg">{selectedFile.name}</span>
+                    </>
+                )}
+              </div>
+
+              {contentsError && <p className="repo-contents-loading">This repository is empty or has no content to display.</p>}
+              {contentsLoading && <p className="repo-contents-loading">Loading…</p>}
+
+              {!contentsLoading && !contentsError && selectedFile ? (
+                  <div className="file-viewer">
+                    <div className="file-viewer-header">
+                      <span className="file-viewer-name">{selectedFile.name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span className="file-viewer-lines">
+                          {selectedFile.content.split('\n').filter(Boolean).length} lines
+                        </span>
+                        <button
+                            onClick={() => setIsDarkBox(!isDarkBox)}
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              border: '1px solid #d0d7de',
+                              backgroundColor: '#f6f8fa',
+                              color: '#24292e',
+                            }}
+                        >
+                          {isDarkBox ? '☀️ Light Mode' : '🌙 Dark Mode'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Check extension and route to the correct viewer */}
+                    {selectedFile.name.toLowerCase().endsWith('.md') ? (
+                        <MarkdownViewer content={selectedFile.content} isDarkMode={isDarkBox} />
+                    ) : (
+                        <SyntaxHighlighter
+                            content={selectedFile.content}
+                            isDarkMode={isDarkBox}
+                            filename={selectedFile.name}
+                        />
+                    )}
+                  </div>
+              ) : !contentsLoading && !contentsError && (
+                  <div className="file-list">
+                    {[...dirItems]
+                        .sort((a, b) => {
+                          const aIsFile = looksLikeFile(a);
+                          const bIsFile = looksLikeFile(b);
+
+                          // If they are both folders or both files, sort alphabetically
+                          if (aIsFile === bIsFile) {
+                            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+                          }
+
+                          // Otherwise, folders (-1) come before files (1)
+                          return aIsFile ? 1 : -1;
+                        })
+                        .map((name) => (
+                            <div key={name} className="file-row">
+                          <span className="file-icon-cell">
+                            {looksLikeFile(name) ? <FileIcon /> : <FolderIcon />}
+                          </span>
+                              <button
+                                  className="file-name-btn"
+                                  onClick={() => handleItemClick(name)}
+                              >
+                                {name}
+                              </button>
+                            </div>
+                        ))}
+                    {dirItems.length === 0 && (
+                        <div className="file-empty">This directory is empty.</div>
+                    )}
+                  </div>
+              )}
+            </div>
+        )}
+
+        {canManageMembers && (
+            <div className="danger-zone">
+              <h2 className="danger-zone-title">Danger zone</h2>
+              <div className="danger-zone-row">
+                <div className="danger-zone-text">
+                  <p className="danger-zone-row-title">Delete this repository</p>
+                  <p className="danger-zone-row-desc">
+                    Once deleted, this repository, its issues, pull requests, and bounties cannot be recovered.
+                  </p>
+                </div>
+                <button
+                    type="button"
+                    className="danger-zone-btn"
+                    onClick={() => setIsDeleteModalOpen(true)}
+                >
+                  Delete repository
+                </button>
+              </div>
+            </div>
+        )}
+      </div>
+  );
+}

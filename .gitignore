@@ -24,3 +24,18 @@ hs_err_pid*
 replay_pid*
 
 .idea/
+
+repositories/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# private ssh key to VPS
+/gitbounty
+
+.env
+
+node_modules
+
+/test_project

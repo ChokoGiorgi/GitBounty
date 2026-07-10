@@ -1,0 +1,115 @@
+package org.gitbounty.gitbountybackend.service.codebase.branch;
+
+import org.gitbounty.gitbountybackend.exception.BranchNotFoundException;
+import org.gitbounty.gitbountybackend.model.Branch;
+import org.gitbounty.gitbountybackend.model.Codebase;
+import org.gitbounty.gitbountybackend.model.Commit;
+import org.gitbounty.gitbountybackend.service.codebase.commit.CommitRepository;
+import org.jspecify.annotations.NonNull;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class BranchService {
+
+	private final BranchRepository branchRepository;
+	private final CommitRepository commitRepository;
+
+	public BranchService(BranchRepository branchRepository, CommitRepository commitRepository) {
+		this.branchRepository = branchRepository;
+		this.commitRepository = commitRepository;
+	}
+
+    public Branch createNewBranchForCodebase(Codebase codebase, String branchName, Commit latestCommit) {
+		assertCodebasePersisted(codebase);
+		assertBranchNameValid(branchName);
+
+		// Normalize to full ref name used in the DB (store as "refs/heads/..." )
+		final String normalized = getNormalized(branchName);
+
+		// Build branch entity and attach to codebase (keeps bidirectional association)
+		Branch toCreate = Branch.builder()
+				.codebase(codebase)
+				.name(normalized)
+				.latestCommit(latestCommit)
+				.build();
+
+		return branchRepository.save(toCreate);
+	}
+
+	private static @NonNull String getNormalized(String branchName) {
+		return branchName.startsWith("refs/heads/") ? branchName : "refs/heads/" + branchName;
+	}
+
+	@Transactional
+	public Branch createNewBranchForCodebase(Codebase codebase, String branchName) {
+		return createNewBranchForCodebase(codebase, branchName, null);
+	}
+
+	@Transactional
+	public Branch updateBranchLatestCommit(Codebase codebase, String branchName, Commit latestCommit) {
+		Branch branch = findBranchForCodebase(codebase, branchName)
+			.orElseThrow(() -> new BranchNotFoundException("Branch not found: " + branchName));
+
+		branch.setLatestCommit(latestCommit);
+		return branchRepository.save(branch);
+	}
+
+	@Transactional
+	public void deleteBranchForCodebase(Codebase codebase, String branchName) {
+		Branch branch = findBranchForCodebase(codebase, branchName)
+			.orElseThrow(() -> new BranchNotFoundException("Branch not found: " + branchName));
+
+		branchRepository.delete(branch);
+	}
+
+	/**
+	 * Removes every branch row for a codebase. Callers must delete any issues/pull
+	 * requests referencing those branches first, since those FKs are not cascading.
+	 */
+	@Transactional
+	public void deleteAllBranchesForCodebase(Codebase codebase) {
+		assertCodebasePersisted(codebase);
+		for (Branch branch : branchRepository.findByCodebaseId(codebase.getId())) {
+			branchRepository.delete(branch);
+		}
+	}
+
+	public Optional<Branch> findBranchForCodebase(Codebase codebase, String branchName) {
+		assertCodebasePersisted(codebase);
+		assertBranchNameValid(branchName);
+
+		final String normalized = getNormalized(branchName);
+		Optional<Branch> maybe = branchRepository.findByCodebaseIdAndName(codebase.getId(), normalized);
+
+		// If a branch exists and points to a latestCommit, explicitly load the commit
+		// via the CommitRepository while we're inside the transactional boundary.
+		maybe.ifPresent(b -> {
+			Commit latest = b.getLatestCommit();
+			if (latest != null && latest.getId() != null) {
+				commitRepository.findById(latest.getId()).ifPresent(b::setLatestCommit);
+			}
+		});
+
+		return maybe;
+	}
+
+	public List<Branch> getAllBranchesForCodebase(Codebase codebase) {
+		assertCodebasePersisted(codebase);
+		return branchRepository.findByCodebaseId(codebase.getId());
+	}
+
+	private void assertCodebasePersisted(Codebase codebase) {
+		if (codebase == null || codebase.getId() == null) {
+			throw new IllegalArgumentException("Codebase must be a persisted entity");
+		}
+	}
+	private void assertBranchNameValid(String branchName) {
+		if (branchName == null || branchName.isBlank()) {
+			throw new IllegalArgumentException("Branch name is required");
+		}
+	}
+}

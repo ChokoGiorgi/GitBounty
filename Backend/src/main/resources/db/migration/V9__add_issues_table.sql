@@ -1,0 +1,12 @@
+CREATE TABLE issues (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        author_id BIGINT NOT NULL,
+                        repository_id BIGINT NOT NULL,
+                        created_at TIMESTAMP(6),
+                        updated_at TIMESTAMP(6),
+                        description TEXT,
+                        status VARCHAR(255) NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        CONSTRAINT fk_issues_author FOREIGN KEY (author_id) REFERENCES users(id),
+                        CONSTRAINT fk_issues_codebase FOREIGN KEY (repository_id) REFERENCES codebases(id)
+);

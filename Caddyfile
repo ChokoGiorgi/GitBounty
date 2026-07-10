@@ -1,0 +1,21 @@
+# Frontend (The main website)
+{$DOMAIN} {
+    root * /var/www/html
+
+    # Enable the built-in file server
+    file_server
+
+    # Essential for modern SPAs (React/Vue/Angular)
+    # This ensures that refreshing the page on a route like /profile
+    # doesn't result in a 404
+    try_files {path} /index.html
+}
+
+# Backend API
+api.{$DOMAIN} {
+    reverse_proxy backend:8081
+}
+
+auth.{$DOMAIN} {
+     reverse_proxy keycloak:8080
+}

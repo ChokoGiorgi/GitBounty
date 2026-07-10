@@ -1,0 +1,72 @@
+{
+  "realm": "gitbounty",
+  "enabled": true,
+  "displayName": "GitBounty",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "clients": [
+    {
+      "clientId": "gitbounty-backend",
+      "name": "GitBounty Backend",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "secret": "gitbounty-backend-secret",
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      }
+    },
+    {
+      "clientId": "gitbounty-frontend",
+      "name": "GitBounty Frontend",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "clientAuthenticatorType": "none",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [
+        "http://backend:8081/swagger-ui/oauth2-redirect.html",
+        "http://localhost:8081/swagger-ui/oauth2-redirect.html",
+        "https://localhost/swagger-ui/oauth2-redirect.html"
+      ],
+      "webOrigins": [
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "https://localhost"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "Standard GitBounty user"
+      },
+      {
+        "name": "admin",
+        "description": "GitBounty administrator"
+      }
+    ]
+  },
+  "defaultRoles": [
+    "user"
+  ]
+}

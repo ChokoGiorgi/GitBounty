@@ -1,0 +1,128 @@
+services:
+  backend:
+    image: ghcr.io/freeuni-oop/gitbounty-backend:${BRANCH_NAME:-latest}
+#    build:
+#        context: ./Backend
+#        dockerfile: ./Dockerfile
+    container_name: gitbounty-backend
+    restart: unless-stopped
+    platform: linux/amd64
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      GIT_REPOSITORIES_ROOT: /app/repositories
+    ports:
+      - "8081:8081"
+    volumes:
+      - gitbounty-repositories:/app/repositories
+    env_file:
+      - .env
+    develop:
+      watch:
+        - path: Backend/src
+          action: rebuild
+    networks:
+      - gitbounty-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q -O - http://localhost:8081/health > /dev/null 2>&1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+#
+#  mysql:
+#    image: mysql:8.0
+#    container_name: gitbounty-mysql
+#    environment:
+#      MYSQL_ROOT_PASSWORD: root
+#      MYSQL_USER: ${DB_USER}
+#      MYSQL_PASSWORD: ${DB_PASSWORD}
+#      MYSQL_DATABASE: gitbounty
+#    ports:
+#      - "3306:3306"
+#    volumes:
+#      - mysql-data:/var/lib/mysql
+#      - ./db/init:/docker-entrypoint-initdb.d
+#    healthcheck:
+#      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+#      timeout: 10s
+#      retries: 10
+#      interval: 5s
+#    networks:
+#      - gitbounty-network
+
+  keycloak-db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: password
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    networks:
+        - gitbounty-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U keycloak -d keycloak" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: ghcr.io/freeuni-oop/gitbounty-keycloak:${BRANCH_NAME:-latest}
+    container_name: gitbounty-keycloak
+#    build:
+#      context: .
+#      dockerfile: ./keycloak/Dockerfile
+    environment:
+        KC_HOSTNAME: ${KEYCLOAK_HOSTNAME}
+        KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+        KC_DB_USERNAME: keycloak
+        KC_DB_PASSWORD: password
+        KEYCLOAK_ADMIN: admin
+        KEYCLOAK_ADMIN_PASSWORD: admin
+    command: --http-enabled=true
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import
+    networks:
+      - gitbounty-network
+
+  # This service runs for one second at startup, copies files, and exits
+  frontend:
+    image: ghcr.io/freeuni-oop/gitbounty-frontend:${BRANCH_NAME:-latest}
+#    build:
+#        context: ./Frontend/gitbounty
+#        dockerfile: ./Dockerfile
+    entrypoint: [ "/bin/sh", "-c", "cp -r /www/data/* /data && tail -f /dev/null" ]
+    volumes:
+      - frontend_dist:/data
+
+  caddy:
+    image: caddy:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+      # Caddy mounts a volume that gets populated by the frontend image
+      - frontend_dist:/var/www/html:ro
+    networks:
+      - gitbounty-network
+
+
+volumes:
+  mysql-data:
+  gitbounty-repositories:
+  keycloak_db_data:
+  caddy_config:
+  caddy_data:
+  frontend_dist:
+
+networks:
+  gitbounty-network:

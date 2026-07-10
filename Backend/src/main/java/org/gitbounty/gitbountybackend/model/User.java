@@ -1,74 +1,50 @@
 package org.gitbounty.gitbountybackend.model;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 
+@Setter
+@Getter
 @Entity
-@Table(name = "users")
+@Table(name = "users",
+indexes = @Index(name = "idx_users_keycloak_id", columnList = "keycloak_id") )
 public class User {
 
+    // Getters and Setters
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 255)
+    @Column(nullable = false, unique = true)
     private String username;
 
-    @Column(nullable = false, unique = true, length = 255)
+    @Column(nullable = false, unique = true)
     private String email;
+
+    @Column(name = "keycloak_id", nullable = false, unique = true)
+    private String keycloakId; // Keycloak's unique sub claim string
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @CreationTimestamp
     private LocalDateTime createdAt;
 
+    @Column(name = "credit_balance", nullable = false)
+    private BigDecimal creditBalance = BigDecimal.ZERO;
+
     // Constructors
     public User() {
     }
 
-    public User(String username, String email) {
+    public User(String username, String email, String keycloakId) {
         this.username = username;
         this.email = email;
+        this.keycloakId = keycloakId;
         this.createdAt = LocalDateTime.now();
-    }
-
-    // Getters and Setters
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getUsername() {
-        return username;
-    }
-
-    public void setUsername(String username) {
-        this.username = username;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
     }
 
     @Override
@@ -80,5 +56,6 @@ public class User {
                 ", createdAt=" + createdAt +
                 '}';
     }
+
 }
 

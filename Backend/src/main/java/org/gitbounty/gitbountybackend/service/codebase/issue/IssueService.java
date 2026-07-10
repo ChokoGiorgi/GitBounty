@@ -1,0 +1,198 @@
+package org.gitbounty.gitbountybackend.service.codebase.issue;
+
+import java.security.Principal;
+
+import org.gitbounty.gitbountybackend.model.Codebase;
+import org.gitbounty.gitbountybackend.model.Issue;
+import org.gitbounty.gitbountybackend.model.User;
+
+import org.gitbounty.gitbountybackend.model.IssueStatus;
+
+import org.gitbounty.gitbountybackend.service.codebase.CodebaseService;
+import org.gitbounty.gitbountybackend.service.user.UserService;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.gitbounty.gitbountybackend.exception.IssueNotFoundException;
+import org.gitbounty.gitbountybackend.service.codebase.issue.event.IssueClosedEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import org.gitbounty.gitbountybackend.service.codebase.codebasemember.CodebaseMemberService;
+
+import java.util.List;
+
+@Service
+public class IssueService {
+
+    private final IssueRepository issueRepository;
+    private final CodebaseService codebaseService;
+    private final UserService userService;
+    private final CodebaseMemberService codebaseMemberService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    public IssueService(
+            IssueRepository issueRepository,
+            CodebaseService codebaseService,
+            UserService userService, CodebaseMemberService codebaseMemberService,
+            ApplicationEventPublisher eventPublisher
+    ) {
+        this.issueRepository = issueRepository;
+        this.codebaseService = codebaseService;
+        this.userService = userService;
+        this.codebaseMemberService = codebaseMemberService;
+        this.eventPublisher = eventPublisher;
+    }
+
+    @Transactional
+    public Issue createIssue(String repositoryName, String title, String description, Principal principal) {
+        String normalizedTitle = normalizeTitle(title);
+        User author = resolveAuthor(principal);
+        Codebase codebase = codebaseService.getCodebase(repositoryName);
+
+        // added this to get the number of the next issue in the current repository
+        // (number of already existing issues) + 1
+        Integer nextNumber = issueRepository.findMaxNumberByRepositoryId(codebase.getId())
+                .map(maxNumber -> maxNumber + 1)
+                .orElse(1);
+
+        Issue issue = new Issue();
+        issue.setNumber(nextNumber);
+        issue.setTitle(normalizedTitle);
+        issue.setDescription(normalizeDescription(description));
+        issue.setAuthor(author);
+        issue.setRepository(codebase);
+
+        return issueRepository.saveAndFlush(issue);
+    }
+
+    private User resolveAuthor(Principal principal) {
+        String principalName = principal.getName();
+
+        return userService.findByKeycloakId(principalName)
+                .or(() -> userService.findByUsername(principalName))
+                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+    }
+
+    private String normalizeTitle(String title) {
+        if (title == null || title.trim().isBlank()) {
+            throw new IllegalArgumentException("Issue title is required");
+        }
+
+        return title.trim();
+    }
+
+    private String normalizeDescription(String description) {
+        return description == null ? null : description.trim();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Issue> listIssues(String repositoryName) {
+        codebaseService.getCodebase(repositoryName);
+        return issueRepository.findByRepositoryName(repositoryName);
+    }
+
+    @Transactional(readOnly = true)
+    public Issue getIssue(String repositoryName, Integer issueNumber) {
+        codebaseService.getCodebase(repositoryName);
+
+        return issueRepository.findByRepositoryNameAndNumber(repositoryName, issueNumber)
+                .orElseThrow(() -> new IssueNotFoundException("Issue not found: #" + issueNumber));
+    }
+
+    @Transactional
+    public Issue updateIssueState(String repositoryName, Integer issueNumber, IssueStatus status) {
+        if (status == null) {
+            throw new IllegalArgumentException("Issue status is required");
+        }
+
+        Issue issue = getIssue(repositoryName, issueNumber);
+        issue.setStatus(status);
+        Issue savedIssue = issueRepository.saveAndFlush(issue);
+
+        if (status == IssueStatus.CLOSED) {
+            publishIssueClosed(savedIssue);
+        }
+
+        return savedIssue;
+    }
+
+    @Transactional
+    public Issue assignIssue(String repositoryName, Integer issueNumber, String username) {
+        if (username == null || username.trim().isBlank()) {
+            throw new IllegalArgumentException("Assignee username is required");
+        }
+
+        Issue issue = getIssue(repositoryName, issueNumber);
+
+        if (issue.getStatus() == IssueStatus.CLOSED) {
+            throw new IllegalArgumentException("Cannot assign a closed issue");
+        }
+
+        User assignee = codebaseMemberService.getMemberUser(repositoryName, username.trim());
+
+        issue.setAssignedTo(assignee);
+
+        return issueRepository.saveAndFlush(issue);
+    }
+
+    /**
+     * Announces whether the closed issue has an approved recipient.
+     */
+    private void publishIssueClosed(Issue issue) {
+        User assignedUser = issue.getAssignedTo();
+
+        if (assignedUser == null) {
+            eventPublisher.publishEvent(IssueClosedEvent.cancelled(issue.getId()));
+            return;
+        }
+
+        eventPublisher.publishEvent(IssueClosedEvent.completed(issue.getId(), assignedUser.getId()));
+    }
+
+    @Transactional
+    public Issue claimIssue(Issue issue, User claimant) {
+        if (issue == null || issue.getId() == null) {
+            throw new IllegalArgumentException("A saved issue is required.");
+        }
+
+        if (claimant == null || claimant.getId() == null) {
+            throw new IllegalArgumentException("A saved claimant is required.");
+        }
+
+        if (issue.getStatus() == IssueStatus.CLOSED) {
+            throw new IllegalArgumentException("Cannot claim a closed issue.");
+        }
+
+        if (issue.getAssignedTo() != null) {
+            throw new IllegalArgumentException("Issue is already assigned.");
+        }
+
+        issue.setAssignedTo(claimant);
+        return issueRepository.saveAndFlush(issue);
+    }
+
+    @Transactional
+    public Issue unclaimIssue(Issue issue, User claimant) {
+        if (issue == null || issue.getId() == null) {
+            throw new IllegalArgumentException("A saved issue is required.");
+        }
+
+        if (claimant == null || claimant.getId() == null) {
+            throw new IllegalArgumentException("A saved claimant is required.");
+        }
+
+        if (issue.getStatus() == IssueStatus.CLOSED) {
+            throw new IllegalArgumentException("Cannot leave a closed issue.");
+        }
+
+        User assignedUser = issue.getAssignedTo();
+        if (assignedUser == null) {
+            throw new IllegalArgumentException("Issue is not assigned.");
+        }
+
+        if (!claimant.getId().equals(assignedUser.getId())) {
+            throw new IllegalArgumentException("Only the assigned user can leave this issue.");
+        }
+
+        issue.setAssignedTo(null);
+        return issueRepository.saveAndFlush(issue);
+    }
+}
